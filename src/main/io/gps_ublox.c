@@ -47,6 +47,8 @@
 #include "io/gps.h"
 #include "io/gps_private.h"
 
+#include "scheduler/protothreads.h"
+
 #define GPS_VERSION_DETECTION_TIMEOUT_MS    300
 #define MAX_UBLOX_PAYLOAD_SIZE              256
 #define UBLOX_BUFFER_SIZE                   MAX_UBLOX_PAYLOAD_SIZE
@@ -691,165 +693,109 @@ static bool gpsNewFrameUBLOX(uint8_t data)
     return parsed;
 }
 
-static void gpsConfigure(void)
+STATIC_PROTOTHREAD(gpsConfigure)
 {
-    static bool requestIsSent;
+    ptBegin(gpsConfigure);
 
-    switch (gpsState.autoConfigStep) {
-    case 0:
-        switch (gpsState.gpsConfig->dynModel) {
-            case GPS_DYNMODEL_PEDESTRIAN:
-                configureNAV5(UBX_DYNMODEL_PEDESTRIAN, UBX_FIXMODE_AUTO);
-                break;
-            case GPS_DYNMODEL_AIR_1G:   // Default to this
-            default:
-                configureNAV5(UBX_DYNMODEL_AIR_1G, UBX_FIXMODE_AUTO);
-                break;
-            case GPS_DYNMODEL_AIR_4G:
-                configureNAV5(UBX_DYNMODEL_AIR_1G, UBX_FIXMODE_AUTO);
-                break;
-        }
-        gpsState.autoConfigStep++;
-        break;
+    // Set dynamic model
+    switch (gpsState.gpsConfig->dynModel) {
+        case GPS_DYNMODEL_PEDESTRIAN:
+            configureNAV5(UBX_DYNMODEL_PEDESTRIAN, UBX_FIXMODE_AUTO);
+            break;
+        case GPS_DYNMODEL_AIR_1G:   // Default to this
+        default:
+            configureNAV5(UBX_DYNMODEL_AIR_1G, UBX_FIXMODE_AUTO);
+            break;
+        case GPS_DYNMODEL_AIR_4G:
+            configureNAV5(UBX_DYNMODEL_AIR_1G, UBX_FIXMODE_AUTO);
+            break;
+    }
+    ptWait(_ack_state == UBX_ACK_GOT_ACK);
 
-    case 2:
-        configureMSG(MSG_CLASS_NMEA, MSG_NMEA_GGA, 0);
-        gpsState.autoConfigStep++;
-        break;
+    // Disable NMEA messages
+    configureMSG(MSG_CLASS_NMEA, MSG_NMEA_GGA, 0);
+    ptWait(_ack_state == UBX_ACK_GOT_ACK);
 
-    case 4:
-        configureMSG(MSG_CLASS_NMEA, MSG_NMEA_GLL, 0);
-        gpsState.autoConfigStep++;
-        break;
+    configureMSG(MSG_CLASS_NMEA, MSG_NMEA_GLL, 0);
+    ptWait(_ack_state == UBX_ACK_GOT_ACK);
 
-    case 6:
-        configureMSG(MSG_CLASS_NMEA, MSG_NMEA_GSA, 0);
-        gpsState.autoConfigStep++;
-        break;
+    configureMSG(MSG_CLASS_NMEA, MSG_NMEA_GSA, 0);
+    ptWait(_ack_state == UBX_ACK_GOT_ACK);
 
-    case 8:
-        configureMSG(MSG_CLASS_NMEA, MSG_NMEA_GSV, 0);
-        gpsState.autoConfigStep++;
-        break;
+    configureMSG(MSG_CLASS_NMEA, MSG_NMEA_GSV, 0);
+    ptWait(_ack_state == UBX_ACK_GOT_ACK);
 
-    case 10:
-        configureMSG(MSG_CLASS_NMEA, MSG_NMEA_RMC, 0);
-        gpsState.autoConfigStep++;
-        break;
+    configureMSG(MSG_CLASS_NMEA, MSG_NMEA_RMC, 0);
+    ptWait(_ack_state == UBX_ACK_GOT_ACK);
 
-    case 12:
-        configureMSG(MSG_CLASS_NMEA, MSG_NMEA_VGS, 0);
-        gpsState.autoConfigStep++;
-        break;
+    configureMSG(MSG_CLASS_NMEA, MSG_NMEA_VGS, 0);
+    ptWait(_ack_state == UBX_ACK_GOT_ACK);
 
-    case 14: // Enable UBX messages
-        if ((gpsState.gpsConfig->provider == GPS_UBLOX) || (gpsState.hwVersion < 70000)) {
-            configureMSG(MSG_CLASS_UBX, MSG_POSLLH, 1);
-        }
-        else {
-            configureMSG(MSG_CLASS_UBX, MSG_POSLLH, 0);
-        }
-        gpsState.autoConfigStep++;
-        break;
+    // Configure UBX binary messages
+    if ((gpsState.gpsConfig->provider == GPS_UBLOX) || (gpsState.hwVersion < 70000)) {
+        configureMSG(MSG_CLASS_UBX, MSG_POSLLH, 1);
+        ptWait(_ack_state == UBX_ACK_GOT_ACK);
 
-    case 16:
-        if ((gpsState.gpsConfig->provider == GPS_UBLOX) || (gpsState.hwVersion < 70000)) {
-            configureMSG(MSG_CLASS_UBX, MSG_STATUS, 1);
-        }
-        else {
-            configureMSG(MSG_CLASS_UBX, MSG_STATUS, 0);
-        }
-        gpsState.autoConfigStep++;
-        break;
+        configureMSG(MSG_CLASS_UBX, MSG_STATUS, 1);
+        ptWait(_ack_state == UBX_ACK_GOT_ACK);
 
-    case 18:
-        if ((gpsState.gpsConfig->provider == GPS_UBLOX) || (gpsState.hwVersion < 70000)) {
-            configureMSG(MSG_CLASS_UBX, MSG_SOL, 1);
-        }
-        else {
-            configureMSG(MSG_CLASS_UBX, MSG_SOL, 0);
-        }
-        gpsState.autoConfigStep++;
-        break;
+        configureMSG(MSG_CLASS_UBX, MSG_SOL, 1);
+        ptWait(_ack_state == UBX_ACK_GOT_ACK);
 
-    case 20:
-        if ((gpsState.gpsConfig->provider == GPS_UBLOX) || (gpsState.hwVersion < 70000)) {
-            configureMSG(MSG_CLASS_UBX, MSG_VELNED, 1);
-        }
-        else {
-            configureMSG(MSG_CLASS_UBX, MSG_VELNED, 0);
-        }
-        gpsState.autoConfigStep++;
-        break;
+        configureMSG(MSG_CLASS_UBX, MSG_VELNED, 1);
+        ptWait(_ack_state == UBX_ACK_GOT_ACK);
 
-    case 22:
-        if ((gpsState.gpsConfig->provider == GPS_UBLOX) || (gpsState.hwVersion < 70000)) {
-            configureMSG(MSG_CLASS_UBX, MSG_TIMEUTC, 10);
-        }
-        else {
-            configureMSG(MSG_CLASS_UBX, MSG_TIMEUTC, 0);
-        }
-        gpsState.autoConfigStep++;
-        break;
+        configureMSG(MSG_CLASS_UBX, MSG_TIMEUTC, 10);
+        ptWait(_ack_state == UBX_ACK_GOT_ACK);
 
-    case 24:
-        if ((gpsState.gpsConfig->provider == GPS_UBLOX) || (gpsState.hwVersion < 70000)) {
-            configureMSG(MSG_CLASS_UBX, MSG_PVT, 0);
-        }
-        else {
-            configureMSG(MSG_CLASS_UBX, MSG_PVT, 1);
-        }
-        gpsState.autoConfigStep++;
-        break;
-
-    case 25:
         // This may fail on old UBLOX units, advance forward on both ACK and NAK
-        if (_ack_state == UBX_ACK_GOT_ACK || _ack_state == UBX_ACK_GOT_NAK) {
-            gpsState.autoConfigStep++;
-        }
-        break;
+        configureMSG(MSG_CLASS_UBX, MSG_PVT, 0);
+        ptWait(_ack_state == UBX_ACK_GOT_ACK || _ack_state == UBX_ACK_GOT_NAK);
 
-    case 26:
-        configureMSG(MSG_CLASS_UBX, MSG_SVINFO, 0);
-        gpsState.autoConfigStep++;
-        break;
+    }
+    else {
+        configureMSG(MSG_CLASS_UBX, MSG_POSLLH, 0);
+        ptWait(_ack_state == UBX_ACK_GOT_ACK);
 
-    case 28: // Configure RATE
-        if ((gpsState.gpsConfig->provider == GPS_UBLOX) || (gpsState.hwVersion < 70000)) {
-            configureRATE(200); // 5Hz
-        }
-        else if (gpsState.gpsConfig->provider == GPS_UBLOX7PLUS) {
-            configureRATE(100); // 10Hz
-        }
-        gpsState.autoConfigStep++;
-        break;
+        configureMSG(MSG_CLASS_UBX, MSG_STATUS, 0);
+        ptWait(_ack_state == UBX_ACK_GOT_ACK);
 
-    case 30: // SBAS
-        configureSBAS();
-        gpsState.autoConfigStep++;
-        break;
+        configureMSG(MSG_CLASS_UBX, MSG_SOL, 0);
+        ptWait(_ack_state == UBX_ACK_GOT_ACK);
 
-    case 32: // Galileo
-        if (gpsState.gpsConfig->ubloxUseGalileo && capGalileo) {
-            configureGalileo();
-        }
-        gpsState.autoConfigStep++;
-        break;
+        configureMSG(MSG_CLASS_UBX, MSG_VELNED, 0);
+        ptWait(_ack_state == UBX_ACK_GOT_ACK);
 
-    case 34:
-        // ublox should be initialised, try receiving
-        gpsSetState(GPS_RECEIVING_DATA);
-        break;
+        configureMSG(MSG_CLASS_UBX, MSG_TIMEUTC, 0);
+        ptWait(_ack_state == UBX_ACK_GOT_ACK);
 
-    default:
-        // Default state is to wait for ACK and advance one step forward
-        if (_ack_state == UBX_ACK_GOT_ACK) {
-            gpsState.autoConfigStep++;
-        }
-        break;
+        configureMSG(MSG_CLASS_UBX, MSG_PVT, 1);
+        ptWait(_ack_state == UBX_ACK_GOT_ACK);
     }
 
-    return false;
+    configureMSG(MSG_CLASS_UBX, MSG_SVINFO, 0);
+    ptWait(_ack_state == UBX_ACK_GOT_ACK);
+
+    // Configure data rate
+    if ((gpsState.gpsConfig->provider == GPS_UBLOX7PLUS) && (gpsState.hwVersion >= 70000)) {
+        configureRATE(100); // 10Hz
+    }
+    else {
+        configureRATE(200); // 5Hz
+    }
+    ptWait(_ack_state == UBX_ACK_GOT_ACK);
+
+    // Configure SBAS
+    configureSBAS();
+    ptWait(_ack_state == UBX_ACK_GOT_ACK);
+
+    // Enable GALILEO
+    if (gpsState.gpsConfig->ubloxUseGalileo && capGalileo) {
+        configureGalileo();
+        ptWait(_ack_state == UBX_ACK_GOT_ACK);
+    }
+
+    ptEnd(1);
 }
 
 static bool gpsCheckVersion(void)
@@ -861,14 +807,10 @@ static bool gpsCheckVersion(void)
     else {
         // Wait until version found
         if (gpsState.hwVersion != 0) {
-            gpsState.autoConfigStep = 0;
-            gpsState.autoConfigPosition = 0;
             gpsSetState(GPS_CONFIGURE);
         }
         else if ((millis() - gpsState.lastStateSwitchMs) >= GPS_VERSION_DETECTION_TIMEOUT_MS) {
             gpsState.hwVersion = 0;
-            gpsState.autoConfigStep = 0;
-            gpsState.autoConfigPosition = 0;
             gpsSetState(GPS_CONFIGURE);
         }
     }
@@ -893,6 +835,9 @@ static bool gpsReceiveData(void)
 
 static bool gpsInitialize(void)
 {
+    // We are initializing - restart gpsConfigure protothread
+    ptRestart(ptGetHandle(gpsConfigure));
+
     gpsSetState(GPS_CHANGE_BAUD);
     return false;
 }
@@ -942,7 +887,14 @@ bool gpsHandleUBLOX(void)
             return false;
         }
         else {
+            // Run gpsConfigure protothread
             gpsConfigure();
+
+            // If thread is finished and return code is true - set GPS as ready
+            if (ptIsStopped(ptGetHandle(gpsConfigure)) && ptGetReturnCode(ptGetHandle(gpsConfigure))) {
+                gpsSetState(GPS_RECEIVING_DATA);
+            }
+
             return false;
         }
 
