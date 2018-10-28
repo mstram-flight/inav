@@ -118,13 +118,20 @@ struct ptState_s {
   } while (0)
 
 // Wait until thread finishes
-#define ptWaitThread(handle)    ptWait(ptIsStopped(handle))
+#define ptWaitThread(name)                                                  \
+  do {                                                                      \
+    ptLabel();                                                              \
+    name();                                                                 \
+    if (!ptIsStopped(ptGetHandle(name))) {                                  \
+      return;                                                               \
+    }                                                                       \
+  } while (0)
 
 // Execute a protothread and wait for completion
-#define ptSpawn(handle)                                                     \
+#define ptSpawn(name)                                                       \
   do {                                                                      \
-    ptRestart(handle);                                                      \
-    ptWaitThread(handle);                                                   \
+    ptRestart(ptGetHandle(name));                                           \
+    ptWaitThread(name);                                                     \
   } while (0)
 
 // Suspends protothread for a given amount of time

@@ -751,7 +751,6 @@ STATIC_PROTOTHREAD(gpsConfigure)
         // This may fail on old UBLOX units, advance forward on both ACK and NAK
         configureMSG(MSG_CLASS_UBX, MSG_PVT, 0);
         ptWait(_ack_state == UBX_ACK_GOT_ACK || _ack_state == UBX_ACK_GOT_NAK);
-
     }
     else {
         configureMSG(MSG_CLASS_UBX, MSG_POSLLH, 0);
@@ -786,13 +785,17 @@ STATIC_PROTOTHREAD(gpsConfigure)
     ptWait(_ack_state == UBX_ACK_GOT_ACK);
 
     // Configure SBAS
+    // If particular SBAS setting is not supported by the hardware we'll get a NAK,
+    // however GPS would be functional. We are waiting for any response - ACK/NACK
     configureSBAS();
-    ptWait(_ack_state == UBX_ACK_GOT_ACK);
+    ptWait(_ack_state == UBX_ACK_GOT_ACK || _ack_state == UBX_ACK_GOT_NAK);
 
     // Enable GALILEO
     if (gpsState.gpsConfig->ubloxUseGalileo && capGalileo) {
+        // If GALILEO is not supported by the hardware we'll get a NAK, 
+        // however GPS would otherwise be perfectly initialized, so we are just waiting for any response
         configureGalileo();
-        ptWait(_ack_state == UBX_ACK_GOT_ACK);
+        ptWait(_ack_state == UBX_ACK_GOT_ACK || _ack_state == UBX_ACK_GOT_NAK);
     }
 
     ptEnd(1);
@@ -889,6 +892,7 @@ bool gpsHandleUBLOX(void)
         else {
             // Run gpsConfigure protothread
             gpsConfigure();
+            debug[0] = ptGetHandle(gpsConfigure)->line;
 
             // If thread is finished and return code is true - set GPS as ready
             if (ptIsStopped(ptGetHandle(gpsConfigure)) && ptGetReturnCode(ptGetHandle(gpsConfigure))) {
